@@ -1,46 +1,37 @@
-import socket
+import asyncio
+import websockets
 import threading
+import os
 
-HOST = '0.0.0.0'
-PORT = 12345
-
-clients = []
+clients = set()
 log_file = "chat_log.txt"
 
-def broadcast(message, sender_socket):
+async def register(websocket):
+    clients.add(websocket)
+
+async def unregister(websocket):
+    clients.remove(websocket)
+
+async def broadcast(message):
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(message + "\n")
     for client in clients:
-        if client != sender_socket:
-            try:
-                client.sendall(message.encode('utf-8'))
-            except:
-                clients.remove(client)
-
-def handle_client(client_socket, address):
-    print(f"[+] Połączono z {address}")
-    while True:
         try:
-            msg = client_socket.recv(1024).decode('utf-8')
-            if msg:
-                broadcast(msg, client_socket)
-            else:
-                break
+            await client.send(message)
         except:
-            break
-    print(f"[-] Rozłączono z {address}")
-    clients.remove(client_socket)
-    client_socket.close()
+            clients.remove(client)
 
-def main():
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((HOST, PORT))
-    server.listen(5)
-    print(f"🛰️ Serwer nasłuchuje na porcie {PORT}...")
-    while True:
-        client_socket, addr = server.accept()
-        clients.append(client_socket)
-        threading.Thread(target=handle_client, args=(client_socket, addr)).start()
+async def handle_client(websocket, path):
+    await register(websocket)
+    try:
+        async for message in websocket:
+            await broadcast(message)
+    finally:
+        await unregister(websocket)
+
+async def main():
+    server = await websockets.serve(handle_client, '0.0.0.0', 12345)
+    await server.wait_closed()
 
 if __name__ == "__main__":
-    main()
+    asyncio.get_event_loop().run_until_complete(main())
